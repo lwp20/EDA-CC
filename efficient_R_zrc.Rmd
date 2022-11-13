@@ -1,0 +1,173 @@
+---
+title: "Effcient R"
+author: "Ruochen Zhang"
+date: "2022-11-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(profvis)    
+```
+
+# Introduction
+
+R is one of the world's most widely used statistics programming languages, which can be used for statistical analysis, graphics representation, and reporting. With an understanding of its characteristics, we can make our R programming more efficient.
+
+R is an interpreted language, but it calls compiled C, Fortran and other languages behind the scenes.  Ususally calling the complied languages will be more efficient compared with writing codes that take time to compile, Vectorized programming can improve efficiency with little modifications to the codes as vector and matrix as the basic operation units in R and their operations call the compiled codes.
+
+R is very flexible. For example, the variables are in dynamic types and the content and type can be modified. The flexible design brings extra burden to the operation and may make the programs slower. We can improve efficiency by paying attention to its flexibility and memory allocation.
+
+In this tutorial, we will introduce some methods to improve efficiency, including efficient programming  and parallel computation. We will also introduce how to use profiling tools to analyze program efficiency .
+
+# Efficient programming
+
+
+## Vectorized
+
+Accessing the underlying C/Fortran routines as quickly as possible can make the program efficient. The fewer functions calls required to achieve this, the better. Many R functions are vectorised, that is the function’s inputs and/or outputs naturally work with vectors, reducing the number of function calls required. 
+
+We can use the example of calculating mean deviation from median of a sample to show how vectorized functions work.
+
+To caculate:
+$\frac{1}{n}\sum_{i=1}^{n} abs(x_{i}-m)$,where m is the median of the sample.
+
+In method 1, we can calculate it with loops.
+```{r}
+mad_f1 <- function(x){
+  n <- length(x)
+  mhat <- median(x)
+  s <- 0.0
+  for(i in 1:n){
+    s <- s + abs(x[i] - mhat)
+  }
+  s <- s/n
+  return(s)
+}
+```
+
+Using vectorized functions we can write it with `mean()` and `median()`.
+```{r}
+mad_f2 <- function(x) mean( abs(x - median(x)) )
+
+```
+The second method is not only more concise, it is also more efficient. We can compare the running time with `bench::mark`, which will count the running time for multiple times.
+
+```{r}
+x <- runif(10000)
+bench::mark(
+  mad_f1(x),
+  mad_f2(x)
+)
+```
+We can see the vectorised method are almost 4 times faster than the first one. Because the test run is interfered with by other tasks running at the same time in the operating system, so the median or the minimum time (the fastest possible) can better show the efficiency rather than the average time.
+
+It’s also important to make full use of R functions that use vectors. Sometimes it is not straightforward to  use vectors but they can improve the efficiency by many times. Here consider estimating the integral $\int_ {0}^ {1} x^2 dx$ using a Monte-Carlo method. Essentially, we throw darts at the curve and count the number of darts that fall below the curve. A typical way of doing it is as follows:
+```{r}
+monte_carlo = function(N) {
+  hits = 0
+  for (i in seq_len(N)) {
+    u1 = runif(1)
+    u2 = runif(1)
+    if (u1 ^ 2 > u2)
+      hits = hits + 1
+  }
+  return(hits / N)
+}
+```
+A version utilise vectors can be shown as follows:
+```{r}
+monte_carlo_vec = function(N) sum(runif(N)^2 > runif(N)) / N
+```
+By comparing their running time, we can see that the ectorized method is much faster.
+```{r}
+N = 500000
+t1<-system.time(monte_carlo(N))[3]
+t2<-system.time(monte_carlo_vec(N))[3]
+sprintf('monte_carlo time consumption:%.3f',t1)
+sprintf('monte_carlo vectorised version time consumption:%.3f',t2)
+```
+The monte_carlo_vec() function not uses the vectorised functions.In addition,the comparison(>), runif(), power operations(^) are also vectorised by applying to the whole vector rather than repeatedly on single elements.
+
+## Avoid making copies
+
+Cumulative codes like `x <- c(x, y)` may make a copy each time running, It slows down the program when the amount of storage is large or the number of repeated modifications is large. We need to avoid making unnecessary copies to make our program more efficient. To avoid modifying the size of the variables can avoid making copies. In addition, we need to pay attention to how we modify the values of the variables.
+
+When we modify the values in a data frame, it generates a copy every time. But modifying values in a list will not generate copies and thus is more efficient. We will compare the running time of modifying values in this two kinds of data type in the following example.
+```{r}
+set.seed(101)
+m <- 2E4; n <- 100
+x <- as.data.frame(matrix(
+  runif(n*m), nrow=n, ncol=m))
+time1<-system.time({
+  for(j in seq(m)){
+    x[[j]] <- x[[j]] + 1
+  }
+})
+```
+
+```{r}
+set.seed(101)
+m <- 2E4; n <- 100
+x <- replicate(m, 
+  runif(n),
+  simplify=FALSE)
+time2<-system.time({
+  for(j in seq(m)){
+    x[[j]] <- x[[j]] + 1
+  }
+})
+x <- as.data.frame(x)
+```
+
+```{r}
+time1[3]
+time2[3]
+```
+replicate() returns a list when `simplify=FALSE`. Saving data in a list is more efficient to access than saving it in a data frame. But data frames offer more functions. We need to choose base on our needs.
+
+
+# Profiling tools in R
+
+When we try to optimize our R programs. first we need to decide whether it is necessary to do so and where the bottleneck lies. In some simple problems, we can get the results within reasonable time and space consumption.It is also unnecessary when the optimization only results in minor improvements. If we find the bottleneck and it is necessary to optimize it, we still need to consider whether we modify the R codes or we can rewrite this part using other languages like C++ to achieve simple improvements.
+
+To analyze the efficiency of codes, we use the profiling tools in R.
+
+Base R `utils::rprof()`can collect profiling data for program runs, and `utils::summaryRprof()` can provide profiling summaries in text format. We also can use `profvis` package which provides an interactive graphical interface for visualising code profiling data.
+
+Here we use an example to show how `profvis` package works.
+
+```{r}
+profvis({
+  make_adder <- function(n) {
+    function(x) {
+      pause(0.25)
+      x + n
+    }
+  }
+
+  make_adder(1)(10)
+  adder2 <- make_adder(2)
+  adder2(10)
+})
+
+```
+We can see that in flame graph, the upper panel gives the amount of time spent on each line of code. The lower panel  shows the process of the whole program. Some of R’s built-in functions don’t show in the profvis flame graph,although these functions can occupy a lot of time. We need to pay attention to this kind of problem. More discussion into it can be found in the [guide](https://rstudio.github.io/profvis/faq.html).
+
+ For more complex programs,we should save the program as an R source file. Then we use source() method to load the function to be run, and use profvis() to call the function and display the performance analysis results after running.
+```{r}
+ bad_copy <- function(){
+  M <- 1E5
+  x <- c()
+  for(i in seq(M)){
+    x <- c(x, diff(range(runif(10))))
+  }
+  mean(x)
+}
+```
+we can store the function in bad_copy.R. Then run `profvis(bad_copy())`
+
+
+
+
+
