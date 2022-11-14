@@ -315,6 +315,8 @@ stopCluster(cpucl)
 
 # References
 [1] https://csgillespie.github.io/efficientR/programming.html
+
 [2] https://bookdown.org/manishpatwal/bookdown-demo/
+
 [3] https://www.math.pku.edu.cn/teachers/lidf/docs/Rbook/html/_Rbook/prog-prof.html
 
